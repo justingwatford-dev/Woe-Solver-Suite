@@ -1,4 +1,4 @@
-# Oracle (Woe Solver Suite)
+# The Oracle (Woe Solver Suite)
 
 Oracle is an experimental, research-oriented hurricane lifecycle simulator and tracking system. It explores whether a local CFD-style core plus an adaptive guidance layer can maintain realistic storm structure and track under clearly defined modes.
 
@@ -96,5 +96,6 @@ Oracle is a public research prototype. Do not use it for real-world safety or fo
 
 License
 MIT (see LICENSE).
+
 
 
