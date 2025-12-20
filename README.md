@@ -28,7 +28,6 @@ python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
 2) Install dependencies
-If you have a requirements.txt, use it. If not, add one (recommended).
 
 bash
 Copy code
@@ -101,3 +100,4 @@ Oracle is a public research prototype. Do not use it for real-world safety or fo
 
 License
 MIT (see LICENSE).
+
