@@ -30,11 +30,9 @@ python -m venv .venv
 2) Install dependencies
 
 bash
-Copy code
 pip install numpy scipy matplotlib
 3) Run a basic test
 bash
-Copy code
 python quick_start.py
 Running a storm simulation
 Primary entry point:
@@ -44,7 +42,6 @@ World_woe_main_adaptive.py — main simulation driver
 Example (as documented):
 
 bash
-Copy code
 python World_woe_main_adaptive.py --storm KATRINA --year 2005 --initial-wind 50.0
 Training campaigns
 Campaign runner:
@@ -54,7 +51,6 @@ run_training_campaign.py
 Example:
 
 bash
-Copy code
 python run_training_campaign.py --storm WILMA --year 2005 --runs 20 --vary
 Data sources
 Oracle can integrate:
@@ -100,4 +96,5 @@ Oracle is a public research prototype. Do not use it for real-world safety or fo
 
 License
 MIT (see LICENSE).
+
 
