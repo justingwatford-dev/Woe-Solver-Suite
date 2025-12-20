@@ -203,8 +203,6 @@ tail -f logs/oracle_v4_IVAN_*.log
 | [PATCHES.md](./docs/PATCHES.md) | Complete patch history (V28-V52) |
 | [TECHNICAL.md](./docs/TECHNICAL.md) | Architecture deep-dive |
 | [CAMPAIGN.md](./docs/CAMPAIGN.md) | Storm roster & status |
-| [CONTRIBUTING.md](./docs/CONTRIBUTING.md) | Development philosophy |
-| [ReadmeOracleFullLife.md](./ReadmeOracleFullLife.md) | Full development journal |
 
 ---
 
@@ -284,3 +282,4 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 
 **Last Updated:** December 2025  
 **Target Completion:** June 2026
+
