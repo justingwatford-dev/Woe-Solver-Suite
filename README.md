@@ -1,6 +1,7 @@
 # Oracle V4
 
-GPU-accelerated hurricane lifecycle simulation system.
+Oracle V4 is a single-GPU hurricane lifecycle simulator exploring whether a local CFD core + an adaptive guidance layer can maintain realistic structure and track under clearly defined modes.
+This is a research prototype demonstrating physics-based track reconstruction with data assimilation. It is NOT an operational forecast system and has not been validated for predictive skill.
 
 [![Status](https://img.shields.io/badge/Campaign-Active-brightgreen)]()
 [![Storm](https://img.shields.io/badge/Current-Ivan%202004-blue)]()
@@ -282,4 +283,5 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 
 **Last Updated:** December 2025  
 **Target Completion:** June 2026
+
 
