@@ -1,0 +1,63 @@
+#  WARNING: pip installation NOT RECOMMENDED 
+# 
+# For optimal GPU performance, use conda instead:
+#   conda env create -f environment.yml
+#   conda activate oracle_env
+#
+# This requirements.txt is provided for reference only.
+# 
+#  Issues with pip-only installation:
+#   - Requires manual CUDA toolkit installation (complex)
+#   - CUDA version mismatches common
+#   - Missing GPU library dependencies
+#   - Performance degradation without proper GPU setup
+#   - ~23x slower without proper CUDA integration
+#
+#  Manual CUDA Requirements (if using pip):
+#   - NVIDIA GPU with compute capability 6.0+
+#   - CUDA Toolkit 12.x or 13.x installed
+#   - cuDNN libraries
+#   - Proper environment variables (PATH, LD_LIBRARY_PATH)
+#
+# If you must use pip, install in this order:
+
+# Core scientific computing
+numpy>=2.0.0
+scipy>=1.16.0
+pandas>=2.2.0
+xarray>=2024.0.0
+
+# GPU acceleration (requires CUDA toolkit pre-installed!)
+# Choose ONE based on your CUDA version:
+cupy-cuda12x>=13.6.0  # For CUDA 12.x
+# cupy-cuda13x>=13.6.0  # For CUDA 13.x (uncomment if using CUDA 13)
+
+# Meteorological data handling
+netCDF4>=1.7.0
+cftime>=1.6.0
+cfgrib>=0.9.15
+python-eccodes>=2.37.0
+
+# Data access and APIs
+cdsapi>=0.7.6
+ecmwf-datastores-client>=0.4.0
+requests>=2.32.0
+siphon>=0.10.0
+
+# Geographic/mapping tools
+geopandas>=1.1.0
+shapely>=2.0.0
+pyproj>=3.7.0
+rasterio>=1.4.0
+geopy>=2.4.0
+geojson>=3.2.0
+pyogrio>=0.11.0
+geographiclib>=2.1
+
+# Visualization
+matplotlib>=3.9.0
+pyvista>=0.46.0
+
+# Utilities
+tqdm>=4.67.0
+pillow>=11.0.0
