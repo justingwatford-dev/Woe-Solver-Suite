@@ -1,6 +1,21 @@
 import numpy as np
 import sys
 
+# === ORACLE V60: LANDFALL PHYSICS INTEGRATION ===
+# Ensemble contributions:
+# - Five (GPT-5.2): Conservative physics, blended fluxes
+# - Gemini: ERA5 LSM data pipeline (moving nest compatible)
+# - Claude: Integration and testing
+#
+# Changes in this file:
+# - Added use_landfall_physics toggle in __init__ (line ~323)
+# - Added land_fraction extraction and passing (lines ~1140-1148)
+# - Modified apply_surface_fluxes() call to include land_fraction
+# - Modified calculate_surface_drag() call to include land_fraction
+#
+# Status: READY FOR INTEGRATION TESTING
+# Next: Run Harvey simulation with landfall
+
 # === GPU ACCELERATION TOGGLE ===
 USE_GPU = True
 
@@ -315,6 +330,17 @@ class Simulation3D:
 
         # === DIAGNOSTIC HISTORY ===
         self.frame_history, self.max_wind_history, self.latent_heat_history = [], [], []
+        
+        # === PATCH V60: LANDFALL PHYSICS TOGGLE ===
+        # Five's suggestion: Enable null testing (compare to baseline)
+        # Set to False to run pure-ocean simulation (V59 behavior)
+        # Set to True to enable land/ocean physics (V60 landfall)
+        self.use_landfall_physics = True  # <-- Toggle for testing
+        
+        if self.use_landfall_physics:
+            log_info("🏝️ LANDFALL PHYSICS ENABLED (V60): Ocean/Land blended surface fluxes")
+        else:
+            log_info("🌊 OCEAN-ONLY MODE (V59): Pure ocean simulation for baseline comparison")
         
         # === OUTPUT CONFIGURATION ===
         self.plot_dir = "world_woe_plots"
@@ -1122,12 +1148,24 @@ class Simulation3D:
             # PHASE 4: TURBOCHARGER (Mature Major Hurricane)
             # Storm has earned the right to rapid intensification.
             fuel_load = 1.28 
+        
+        # === PATCH V60.4: GET LAND FRACTION FROM DATA INTERFACE ===
+        # Land fraction updates automatically with moving nest via ERA5 LSM
+        # Conditional on landfall physics toggle for null testing
+        if self.use_landfall_physics:
+            land_fraction = self.data_interface.land_fraction
+        else:
+            land_fraction = None  # Triggers all-ocean behavior in boundaries
             
-        self.q, self.T, q_f, h_f, damp_factor = self.boundaries.apply_surface_fluxes(self.q, self.T, fuel_load)
+        self.q, self.T, q_f, h_f, damp_factor = self.boundaries.apply_surface_fluxes(
+            self.q, self.T, fuel_load, land_fraction  # <-- ADDED land_fraction
+        )
         # === END PATCH V54 ===
         
         # === APPLY SURFACE DRAG ===
-        drag_x_pa, drag_y_pa = self.boundaries.calculate_surface_drag(self.u[:,:,0], self.v[:,:,0])
+        drag_x_pa, drag_y_pa = self.boundaries.calculate_surface_drag(
+            self.u[:,:,0], self.v[:,:,0], land_fraction  # <-- ADDED land_fraction
+        )
         
         dz_physical_m = self.domain_scaler.dimensionless_to_physical_z(self.dz)
         dt_physical_s = self.dt_solver * self.T_CHAR
