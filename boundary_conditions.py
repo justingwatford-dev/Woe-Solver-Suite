@@ -1,5 +1,18 @@
-﻿import numpy as np
+import numpy as np
 import sys
+
+# === ORACLE V60: LANDFALL PHYSICS PATCH ===
+# Ensemble contributions:
+# - Five (GPT-5.2): Conservative land drag, blended fluxes, flux cutoff logic
+# - Gemini: ERA5 LSM integration (see data_interface.py)
+# - Claude: Integration and documentation
+# 
+# Changes in this file:
+# - apply_surface_fluxes(): Added land_fraction parameter, blended moisture/heat fluxes
+# - calculate_surface_drag(): Added land_fraction parameter, blended drag coefficients
+# 
+# Status: READY FOR TESTING (Phase 1 complete)
+# Next: Integrate with data_interface.py ERA5 LSM fetch
 
 # === GPU ACCELERATION TOGGLE ===
 USE_GPU = True
@@ -87,15 +100,18 @@ class BoundaryConditions:
         
         return q_sat
 
-    def apply_surface_fluxes(self, q, T, q_flux_boost_factor):
+    def apply_surface_fluxes(self, q, T, q_flux_boost_factor, land_fraction=None):
         """
         Calculate and apply ocean-atmosphere surface fluxes.
+        
+        PATCH V60.1: LANDFALL PHYSICS - Blended surface fluxes
         
         Computes:
         - Moisture flux (evaporation) driven by humidity deficit
         - Sensible heat flux driven by temperature difference
         - Wind-dependent bulk transfer coefficients
         - Thermodynamic regulator to prevent unrealistic intensification
+        - Land/ocean blending for landfall physics
         
         This is the CRITICAL ocean-atmosphere coupling that fuels hurricanes.
         
@@ -103,18 +119,28 @@ class BoundaryConditions:
             q: 3D specific humidity field (kg/kg)
             T: 3D temperature field (°C)
             q_flux_boost_factor: Multiplier for moisture flux (default: 1.0)
+            land_fraction: 2D land fraction field [0,1] (None = all ocean)
             
         Returns:
-            Tuple: (q_updated, T_updated, mean_q_flux, mean_h_flux)
+            Tuple: (q_updated, T_updated, mean_q_flux, mean_h_flux, dampening_factor)
                 - q_updated: Updated humidity field
                 - T_updated: Updated temperature field
                 - mean_q_flux: Mean moisture flux (kg/(m²·s))
                 - mean_h_flux: Mean heat flux (W/m²)
+                - dampening_factor: WISDOM dampening factor for diagnostics
         """
         # === INPUT VALIDATION ===
         if not xp.all(xp.isfinite(self.sim.u)) or not xp.all(xp.isfinite(q)) or not xp.all(xp.isfinite(T)):
             print("    --- Boundary Condition Warning: Invalid input data (NaN/Inf) ---")
             return q, T, 0, 0, 1.0  # ENSEMBLE: Return dampening_factor=1.0
+        
+        # === PATCH V60.1: LAND FRACTION PREP ===
+        # land_fraction is 2D [nx, ny] in [0,1]. None => all ocean.
+        if land_fraction is None:
+            land_fraction = 0.0
+        else:
+            land_fraction = xp.asarray(land_fraction)
+            land_fraction = xp.clip(land_fraction, 0.0, 1.0)
 
         # === EXTRACT SURFACE FIELDS ===
         q_air_surface = q[:, :, 0]
@@ -182,6 +208,18 @@ class BoundaryConditions:
             C_h_dynamic * self.air_density * self.sim.c_p * wind_speed_ms_surface * (T_ocean_surface - T_air_surface)
         )
         
+        # === PATCH V60.2: BLENDED SURFACE FLUXES (V1) ===
+        # Ensemble contributions:
+        # - Five: Moisture cutoff over land (no ocean evaporation source)
+        # - Five: Sensible heat uses SST, so MUST zero over land (no land skin temp yet)
+        
+        # Moisture: no ocean evaporation source over land.
+        q_flux *= (1.0 - land_fraction)
+        
+        # Sensible heat: current formulation uses SST (ocean surface temp),
+        # so we MUST not apply it over land unless/until we have land skin temp.
+        h_flux *= (1.0 - land_fraction)
+        
         # === ENSEMBLE: Progressive Equilibrium - WISDOM Regulator (The Safety Net) ===
         # === V50.4 PATCH 2: AGGRESSIVE WISDOM RAMP (Opus's Fix) ===
         # Problem: Original 90-110 m/s range allowed 202 kt hypercanes
@@ -239,16 +277,19 @@ class BoundaryConditions:
         # Return the scalar dampening_factor for diagnostics
         return q, T, float(xp.mean(q_flux)), float(xp.mean(h_flux)), dampening_factor
 
-    def calculate_surface_drag(self, u_surface, v_surface):
+    def calculate_surface_drag(self, u_surface, v_surface, land_fraction=None):
         """
         Calculate surface drag stress components.
         
-        Computes the momentum flux (drag stress) at the ocean surface due to
-        wind friction.
+        PATCH V60.3: LANDFALL PHYSICS - Blended surface drag
+        
+        Computes the momentum flux (drag stress) at the surface due to
+        wind friction, blending ocean and land drag coefficients.
         
         Args:
             u_surface: Dimensionless u-velocity at surface (lowest level)
             v_surface: Dimensionless v-velocity at surface (lowest level)
+            land_fraction: 2D land fraction field [0,1] (None = all ocean)
             
         Returns:
             Tuple: (drag_stress_x, drag_stress_y)
@@ -262,13 +303,29 @@ class BoundaryConditions:
         # Convert to physical velocity (m/s) using U_CHAR
         wind_speed_ms = wind_speed_dim * self.sim.U_CHAR
         
+        # === PATCH V60.3: LAND FRACTION PREP ===
+        if land_fraction is None:
+            land_fraction = 0.0
+        else:
+            land_fraction = xp.asarray(land_fraction)
+            land_fraction = xp.clip(land_fraction, 0.0, 1.0)
+        
         # === BULK TRANSFER COEFFICIENTS ===
-        # Drag coefficient increases with wind speed
-        C_d_dynamic = xp.where(
+        # Ocean Cd (existing behavior)
+        C_d_ocean = xp.where(
             wind_speed_ms < 20,  # m/s threshold
             1.6e-3,              # Lower winds
             2.0e-3               # Higher winds (increased surface roughness)
         )
+        
+        # Land Cd (ensemble choice - Five's conservative value)
+        C_d_land = 0.015  # ~7.5x ocean drag (prevents over-weakening)
+        
+        # Blend (prevents coastline flicker)
+        C_d_dynamic = (1.0 - land_fraction) * C_d_ocean + land_fraction * C_d_land
+        
+        # Optional: hard cap to prevent pathological "velcro" if something spikes
+        C_d_dynamic = xp.minimum(C_d_dynamic, 0.03)
         
         # === CALCULATE DRAG STRESS ===
         # τ = C_d * ρ * |V| * V  [Pa = N/m²]
