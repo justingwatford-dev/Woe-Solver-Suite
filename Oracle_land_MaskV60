@@ -1,0 +1,119 @@
+V60.3 NaN FIX
+Date: December 24, 2025
+Incident: Harvey simulation crash at frame 110,700
+Duration: 9.09 hours (110k+ frames successful)
+Status: Root cause identified, fix implemented ✅
+
+CRASH SUMMARY
+What Happened:
+Frame 110,700 (Aug 21, 2017, ~16.4N, 82.5W - Jamaica/Honduras area)
+  ↓
+ERA5 LSM fetch succeeded
+  ↓
+Land-sea mask interpolation returned NaN
+  ↓
+🏝️ Land Fraction processed: nan% land coverage
+  ↓
+NaN propagated into surface fluxes
+  ↓
+NaN contaminated q, T fields
+  ↓
+GPU memory corruption
+  ↓
+💥 cudaErrorIllegalAddress crash
+Console Evidence:
+  -> ORACLE DI: Fetching ERA5 steering & land mask for 2017-08-21 09:03...
+     📊 Fetching pressure-level winds...
+     [SUCCESS]
+     🏝️ Fetching land-sea mask...
+     [SUCCESS]
+     🏝️ Land Fraction processed: nan% land coverage  ← SMOKING GUN
+  -> ERA5 data & Land Mask successfully integrated and uploaded to GPU.
+    --- Boundary Condition Warning: NaN flux detected
+    --- Boundary Condition Warning: Invalid input data (NaN/Inf)
+cupy_backends.cuda.api.runtime.CUDARuntimeError: cudaErrorIllegalAddress
+
+ROOT CAUSE ANALYSIS
+Why NaN in LSM Data?
+Complex Caribbean Coastlines:
+
+Frame 110k location: Jamaica/Honduras region
+Many small islands, intricate coastlines
+ERA5 LSM interpolation struggles with:
+
+Land/ocean boundaries
+Grid cell straddling coastlines
+Missing data at specific lat/lon points
+
+
+
+Why It Worked for 110k Frames:
+
+Frames 0-110k: Open Atlantic Ocean
+
+LSM = 0.0 everywhere (pure ocean)
+No complex coastlines
+No interpolation edge cases
+
+
+
+Why It Failed at Frame 110k:
+
+Harvey approached Caribbean islands
+Complex coastline geometry
+LSM interpolation hit edge case
+Returned NaN instead of valid 0.0-1.0 value
+
+
+THE NaN CASCADE (How One Bad Value Killed the Run)
+python# Step 1: LSM interpolation returns NaN
+lsm_raw = lsm_interp['lsm'].values  # Contains NaN
+
+# Step 2: Gaussian smoothing propagates NaN
+land_fraction = gaussian_filter(lsm_raw.T, sigma=1.5)  # NaN spreads
+
+# Step 3: Upload to GPU
+self.land_fraction = xp.asarray(land_fraction)  # NaN on GPU
+
+# Step 4: Blended fluxes become NaN
+q_flux *= (1.0 - land_fraction)  # 1.0 - NaN = NaN
+h_flux *= (1.0 - land_fraction)  # 1.0 - NaN = NaN
+
+# Step 5: Humidity/temperature fields contaminated
+q[:, :, 0] += q_flux * ...  # NaN propagates into q
+T[:, :, 0] += h_flux * ...  # NaN propagates into T
+
+# Step 6: Solver attempts to operate on NaN arrays
+# GPU encounters illegal memory access
+# CRASH
+
+V60.3 FIX - THREE-LAYER DEFENSE
+Layer 1: Pre-Smoothing NaN Detection
+python# Check for NaN BEFORE gaussian smoothing
+if not np.all(np.isfinite(lsm_data)):
+    nan_count = np.sum(~np.isfinite(lsm_data))
+    print(f"⚠️ WARNING: {nan_count} NaN values in LSM, replacing with 0.0 (ocean)")
+    lsm_data = np.nan_to_num(lsm_data, nan=0.0, posinf=1.0, neginf=0.0)
+Effect: Replaces NaN with safe ocean fallback BEFORE smoothing
+
+Layer 2: Post-Smoothing Validation
+python# Gaussian filter can propagate NaN even if input is clean
+# (Rare edge case with numerical precision)
+land_fraction = gaussian_filter(lsm_data, sigma=1.5)
+land_fraction = np.clip(land_fraction, 0.0, 1.0)
+
+if not np.all(np.isfinite(land_fraction)):
+    print(f"⚠️ CRITICAL: NaN after gaussian_filter, falling back to zero")
+    land_fraction = np.zeros((self.sim.nx, self.sim.ny))
+Effect: Emergency zero-land fallback if smoothing introduces NaN
+
+Layer 3: Backup/Restore (Already Existed)
+python# In update_steering_data()
+land_last_good = xp.copy(self.land_fraction)
+
+try:
+    self._fetch_era5_data(current_sim_time)
+except Exception as e:
+    print(f"FETCH ERROR: {e}")
+    self.land_fraction = land_last_good  # Revert to last known good
+Effect: If entire fetch fails, revert to previous timestep's land mask
