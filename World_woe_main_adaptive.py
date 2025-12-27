@@ -1,20 +1,18 @@
 import numpy as np
 import sys
 
-# === ORACLE V60: LANDFALL PHYSICS INTEGRATION ===
+# === ORACLE V61: ZOMBIE STORM FIX (LANDFALL PHYSICS) ===
 # Ensemble contributions:
-# - Five (GPT-5.2): Conservative physics, blended fluxes
-# - Gemini: ERA5 LSM data pipeline (moving nest compatible)
-# - Claude: Integration and testing
+# - Gemini: "Flywheel Effect" Diagnosis, Momentum Anchor Decoupling, Terrain Roughness
+# - Five: Nonlinear scaling refinement (land_fraction**2), Coastal coherence protection
+# - Claude: Integration, Consensus Building, Core Sample Diagnostic
 #
 # Changes in this file:
-# - Added use_landfall_physics toggle in __init__ (line ~323)
-# - Added land_fraction extraction and passing (lines ~1140-1148)
-# - Modified apply_surface_fluxes() call to include land_fraction
-# - Modified calculate_surface_drag() call to include land_fraction
+# - Patch V61: Momentum Anchor weakened by land_fraction**2 (line ~1260)
+# - Patch V61.1: Terrain Roughness adds local viscosity over land (line ~1350)
+# - Diagnostic: "Core Sample" print to verify mask orientation (line ~1160)
 #
-# Status: READY FOR INTEGRATION TESTING
-# Next: Run Harvey simulation with landfall
+# Status: READY FOR "ZOMBIE HARVEY" TEST
 
 # === GPU ACCELERATION TOGGLE ===
 USE_GPU = True
@@ -1157,6 +1155,16 @@ class Simulation3D:
         else:
             land_fraction = None  # Triggers all-ocean behavior in boundaries
             
+        # === DIAGNOSTIC: LAND FRACTION CORE SAMPLE ===
+        if self.use_landfall_physics and frame % 100 == 0:
+            cx, cy = self.storm_tracker.get_current_center_grid()
+            if cx is not None:
+                # Sample the land fraction exactly at the storm center
+                idx_x, idx_y = int(cx), int(cy)
+                core_land = float(land_fraction[idx_x, idx_y])
+                if core_land > 0.1:
+                    log_info(f"    ⛰️ LANDFALL CONTACT: Core is over {core_land*100:.1f}% Land")
+
         self.q, self.T, q_f, h_f, damp_factor = self.boundaries.apply_surface_fluxes(
             self.q, self.T, fuel_load, land_fraction  # <-- ADDED land_fraction
         )
@@ -1293,18 +1301,6 @@ class Simulation3D:
             mean_wind_value = float(xp.mean(max_wind_ms))
             log_info(f"    DEBUG ANCHOR: Frame {frame}, Max Wind = {max_wind_value:.1f} m/s, Mean Wind = {mean_wind_value:.1f} m/s")
 
-        # === PATCH V19: The "Slip-Clutch" Anchor ===
-        # Max coupling reduced from 0.60 to 0.35.
-        # This allows 80 % of the momentum to "slip"
-        # Drastic reduction to allow steering flow to overcome surface drag.
-        # === PATCH V23: THE UNCHAINED KEEL ===
-        # 1. GOVERNOR DELETED: Let storm spin up naturally to preserve structure
-        # 2. LOWER THRESHOLD: Anchor engages at 18 m/s (TS strength, 35 kts)
-        #    Prevents Zombie Drift even if storm weakens
-        # 3. SMOOTH RAMP: Progressive grip without parking brake
-        # === PATCH V24: INCREASED MAX GRIP ===
-        # Boosted max grip from 0.50 to 0.65 now that we're confident
-        # the anchor will actually engage with the correct wind reading
         # === PATCH V28: THE IRON FLOOR ===
         # Raised minimum from 0.10 to 0.25 to prevent "ice skating" at low intensity
         # With corrected steering (now 7 m/s not 13 m/s), we need stronger grip
@@ -1314,6 +1310,25 @@ class Simulation3D:
             xp.asarray([0.25, 0.40, 0.55, 0.70])   # <--- IRON FLOOR: 0.25 minimum!
         )
         
+        # === PATCH V61: LAND-BASED DECOUPLING (Zombie Fix) ===
+        # Diagnosis: Momentum Anchor was transferring "Flywheel" energy from k=1
+        # to k=0, overriding land friction and creating "Zombie Harvey" (145kts overland).
+        # Fix: Weaken the anchor over land to allow surface friction to kill the winds.
+        if self.use_landfall_physics:
+            # Nonlinear scaling: coastlines preserve coherence,
+            # deep inland allows surface shear-off.
+            # 100% Land = Cut anchor strength by 75%.
+            anchor_factor = 1.0 - (0.75 * land_fraction**2)
+            anchor_strength *= anchor_factor
+            
+            # === PATCH V61.1: TERRAIN ROUGHNESS (VISCOSITY BOOST) ===
+            # Land creates turbulence that shreds structure.
+            # Boost local viscosity (mu) where land is present.
+            # Base mu is ~0.12. Land adds up to +0.10.
+            terrain_roughness = 0.10 * land_fraction
+        else:
+            terrain_roughness = 0.0
+            
         # === *** END PATCH (V13 "Dynamic Anchor") *** ===
 
         # 4. Calculate the change:
@@ -1456,9 +1471,16 @@ class Simulation3D:
         # Increased from 0.05 to 0.10 to catch rapid explosions faster
         self.mu_current = self.mu_current + 0.10 * (mu_target - self.mu_current)
         
-        # 5. Apply to Diffusion
+        # 5. Apply to Diffusion (With V61 Terrain Roughness)
+        # Combine global dynamic viscosity with local terrain roughness
+        # broadcasting terrain_roughness (2D) to 3D shape
+        mu_total = self.mu_current + terrain_roughness[..., xp.newaxis]
+
         for f in [self.u, self.v, self.w]: 
-            f += self.dt_solver * self.mu_current * self.solver.laplacian(f)
+            # Note: technically laplacian(f) is correct, but spatially varying mu 
+            # should really be div(mu * grad(f)). For now, this approximation 
+            # (boosted dissipation over land) is sufficient for the "shredding" effect.
+            f += self.dt_solver * mu_total * self.solver.laplacian(f)
             
         # Debug Print (Every 500 frames)
         if frame % 500 == 0:
